@@ -81,6 +81,10 @@ Production needs a Worker runtime, a D1 binding named `DB`, the included migrati
 
 Never commit access tokens, `.env` files, local database state, or user tracking records.
 
+## Sign-in recovery
+
+When a preview does not provide a full signed-in identity, the page offers ChatGPT sign-in and an option to open the tracker in a new tab. Expired sessions are handled before parsing API responses, so login pages do not appear as generic progress errors. API access still requires an authenticated user, and saved records remain unchanged.
+
 ## Validation
 
-The deployed version passed TypeScript checks and 46 automated checks covering check/uncheck, goal changes, persistence after reload and Worker restart, date validation, user isolation, calendar navigation, and page rendering. Browser visual testing was unavailable in the authoring environment.
+The deployed version passed TypeScript checks and 59 automated checks covering check/uncheck, goal changes, persistence after reload and Worker restart, date validation, user isolation, calendar navigation, and page rendering. Browser visual testing was unavailable in the authoring environment.

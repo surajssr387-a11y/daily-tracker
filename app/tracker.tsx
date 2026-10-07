@@ -10,6 +10,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { START, END, DATES, DEFAULT_GOALS, activeGoals, dayProgress, overallProgress, shiftDate, todayIST, isChallengeDate, type Goal, type TrackerData } from "@/lib/tracker";
+import { readTrackerResponse, TrackerRequestError } from "@/lib/tracker-api";
 
 const icons = { moon: Moon, sunrise: Sunrise, sun: Sun, apple: Apple, utensils: Utensils, target: Target };
 const dateLabel = (date: string, short = false) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: short ? "short" : "long", ...(short ? {} : { weekday: "long" as const }), timeZone: "UTC" }).format(new Date(date + "T12:00:00Z"));
@@ -29,10 +30,15 @@ export default function Tracker() {
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const response = await fetch("/api/tracker", { cache: "no-store" }); const result = await response.json() as TrackerData & { error?: string; signIn?: boolean };
-      if (!response.ok) { setSignIn(!!result.signIn); throw new Error(result.error || "Could not load your tracker."); }
+      const response = await fetch("/api/tracker", { cache: "no-store", credentials: "same-origin" });
+      const result = await readTrackerResponse(response, "load");
       setData(result); setReady(true); setSignIn(false);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not load. Please retry."); }
+    } catch (e) {
+      const needsSignIn = e instanceof TrackerRequestError && e.signIn;
+      setSignIn(needsSignIn);
+      if (needsSignIn) setReady(false);
+      setError(e instanceof Error ? e.message : "Could not load. Please retry.");
+    }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -47,11 +53,17 @@ export default function Tracker() {
     if (!ready || busy.current) throw new Error("Wait for your tracker to finish loading or saving.");
     busy.current = true; setSaving(true); setError("");
     try {
-      const response = await fetch("/api/tracker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const result = await response.json() as TrackerData & { error?: string; signIn?: boolean };
-      if (!response.ok) { setSignIn(!!result.signIn); throw new Error(result.error || "Could not save your change."); }
+      const response = await fetch("/api/tracker", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const result = await readTrackerResponse(response, "save");
+      setSignIn(false);
       flushSync(() => setData(result)); return result as TrackerData;
-    } catch (e) { const message = e instanceof Error ? e.message : "Could not save. Please retry."; setError(message); toast.error(message); throw e; }
+    } catch (e) {
+      const needsSignIn = e instanceof TrackerRequestError && e.signIn;
+      setSignIn(needsSignIn);
+      if (needsSignIn) setReady(false);
+      const message = e instanceof Error ? e.message : "Could not save. Please retry.";
+      setError(message); toast.error(message); throw e;
+    }
     finally { busy.current = false; setSaving(false); }
   }, [ready]);
 
@@ -120,9 +132,9 @@ export default function Tracker() {
           <div className="custom-heading"><h3>Your personal goals</h3><button className="text-button" disabled={!ready || saving || data.today>END} onClick={openAdd}><Plus size={16}/> Add goal</button></div>
           {goals.filter(g=>!g.builtin).length === 0 ? <button className="empty-goals" onClick={openAdd} disabled={!ready || saving || data.today>END}><span className="empty-goal-icon"><Target size={20}/></span><span><strong>Make this arc yours</strong><small>Add a workout, study session, or any daily goal.</small></span><Plus size={18}/></button> : <div className="habit-list custom-list">{goals.filter(g=>!g.builtin).map(g => {
             const checked = data.checkins.some(c => c.date === selected && c.goalId === g.id && c.checked === 1);
-            return <div key={g.id} className={`habit-row ${checked?"checked":""}`}><div className="habit-icon personal"><Target size={21}/></div><label htmlFor={`goal-${g.id}`}><strong>{g.label}</strong><span>{g.detail || "One small promise to yourself."}</span></label>{!g.endDate && <button className="icon-button edit-goal" aria-label={`Edit ${g.label}`} onClick={()=>openEdit(g)} disabled={saving}><Pencil size={15}/></button>}<Checkbox id={`goal-${g.id}`} className="habit-checkbox" aria-label={g.label} checked={checked} disabled={!canEdit} onCheckedChange={value => { void mutate({action:"check",date:selected,goalId:g.id,checked:value===true}).catch(()=>{}); }}/></div>;
+            return <div key={g.id} className={`habit-row ${checked?"checked":""}`}><div className="habit-icon personal"><Target size={21}/></div><label htmlFor={`goal-${g.id}`}><strong>{g.label}</strong><span>{g.detail || "One small promise to yourself."}</span></label>{!g.endDate && <button className="icon-button edit-goal" aria-label={`Edit ${g.label}`} onClick={()=>openEdit(g)} disabled={!ready || saving || loading}><Pencil size={15}/></button>}<Checkbox id={`goal-${g.id}`} className="habit-checkbox" aria-label={g.label} checked={checked} disabled={!canEdit} onCheckedChange={value => { void mutate({action:"check",date:selected,goalId:g.id,checked:value===true}).catch(()=>{}); }}/></div>;
           })}</div>}
-          <div className="save-line" role="status">{loading ? <><LoaderCircle className="spin" size={14}/> Loading your progress…</> : saving ? <><LoaderCircle className="spin" size={14}/> Saving…</> : ready && !error ? <><CloudCheck size={15}/> All changes saved</> : signIn ? <><LockKeyhole size={14}/> Sign in to track your days</> : <>Progress unavailable — please retry.</>}{future && <span>Future check-offs unlock on the day.</span>}</div>
+          <div className="save-line" role="status">{loading ? <><LoaderCircle className="spin" size={14}/> Loading your progress…</> : saving ? <><LoaderCircle className="spin" size={14}/> Saving…</> : ready && !error ? <><CloudCheck size={15}/> All changes saved</> : signIn ? <><LockKeyhole size={14}/> <a className="text-button" href="/signin-with-chatgpt?return_to=%2F" target="_top">Sign in to track your days</a></> : <>Progress unavailable — please retry.</>}{future && <span>Future check-offs unlock on the day.</span>}</div>
         </section>
         <aside className="progress-column">
           <section className="overall-panel panel"><div className="section-label"><span className="eyebrow">THE BIG PICTURE</span><Sparkles size={17}/></div><h2>Your arc,<br/>one action at a time.</h2><div className="overall-number">{overall.percent}<span>%</span></div><p className="muted">of your challenge goals completed</p><Progress value={overall.percent} aria-label="Overall challenge completion" className="overall-bar"/><div className="progress-detail"><span>{overall.done} actions done</span><span>{overall.total} planned</span></div><div className="mini-stats"><div><Flame size={18}/><strong>{overall.streak}<small> days</small></strong><span>Perfect-day streak</span></div><div><Trophy size={18}/><strong>{overall.perfectDays}<small> / 94</small></strong><span>Complete days</span></div></div></section>
